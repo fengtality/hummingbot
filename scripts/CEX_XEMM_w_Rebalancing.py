@@ -27,7 +27,7 @@ class CEX_XEMM_w_Rebalancing(ScriptStrategyBase):
 
     markets = {maker_exchange: {maker_pair}, taker_exchange: {taker_pair}}
 
-    order_amount: int = 20
+    order_amount: int = 1
     exp_profit_bps: int = 20
     min_spread_bps: int = 5
     fee_bps: int = 20
@@ -108,6 +108,7 @@ class CEX_XEMM_w_Rebalancing(ScriptStrategyBase):
         return maker_connector
 
     def total_balance_maker(self):
+        # check the logic of this calculation =)
         total_balance_maker = self.maker_connector.get_balance(self.maker_base) + \
                               (self.maker_connector.get_balance(self.maker_quote) *
                                self.connectors[self.maker_exchange].get_price_for_volume(self.maker_pair, True,
@@ -115,7 +116,10 @@ class CEX_XEMM_w_Rebalancing(ScriptStrategyBase):
         return total_balance_maker
 
     def base_asset_maker_pct(self):
+        # use log statements to check components of the calculation
         base_asset_maker_exchange = self.maker_connector.get_balance(self.maker_base)
+        self.logger().info(f"Numerator: {base_asset_maker_exchange}")
+        self.logger().info(f"Denominator: {self.total_balance_maker()}")
         base_asset_maker_pct = base_asset_maker_exchange / self.total_balance_maker()
         return base_asset_maker_pct
 
@@ -131,6 +135,8 @@ class CEX_XEMM_w_Rebalancing(ScriptStrategyBase):
                                                                                          self.order_amount).result_price)
         rebalancing_amount_maker = self.total_balance_maker() * self.rebalancing_pct
         rebalancing_amount_taker = total_balance_taker * self.rebalancing_pct
+        # use log statement to check if self.base_asset_maker_pct() is returning the expected value
+        self.logger().info(f"Base asset maker %: {self.base_asset_maker_pct()}")
         if self.base_asset_maker_pct() < self.target_base_asset_percentage:
             self.buy(self.maker_exchange, self.maker_pair, rebalancing_amount_maker, order_type=OrderType.MARKET,
                      price=self.connectors[self.maker_exchange].get_price_for_volume(self.maker_pair, True,
