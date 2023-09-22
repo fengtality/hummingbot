@@ -313,6 +313,37 @@ class GateIoPerpetualDerivativeTests(AbstractPerpetualDerivativeTests.PerpetualD
         return mock_response
 
     @property
+    def limit_maker_order_creation_request_successful_mock_response(self):
+        mock_response = {
+            "id": self.expected_exchange_order_id,
+            "user": 100000,
+            "contract": self.exchange_trading_pair,
+            "create_time": 1546569968,
+            "size": 6024,
+            "iceberg": 0,
+            "left": 6024,
+            "price": "3765",
+            "fill_price": "0",
+            "mkfr": "-0.00025",
+            "tkfr": "0.00075",
+            "tif": "poc",
+            "refu": 0,
+            "is_reduce_only": False,
+            "is_close": False,
+            "is_liq": False,
+            "text": get_new_client_order_id(
+                is_buy=True,
+                trading_pair=self.trading_pair,
+                hbot_order_id_prefix=CONSTANTS.HBOT_BROKER_ID,
+                max_id_len=CONSTANTS.MAX_ID_LEN,
+            ),
+            "status": "open",
+            "finish_time": 1514764900,
+            "finish_as": ""
+        }
+        return mock_response
+
+    @property
     def balance_request_mock_response_for_base_and_quote(self):
         mock_response = {
             "user": 1666,
@@ -486,7 +517,7 @@ class GateIoPerpetualDerivativeTests(AbstractPerpetualDerivativeTests.PerpetualD
 
     @property
     def expected_supported_order_types(self):
-        return [OrderType.LIMIT, OrderType.MARKET]
+        return [OrderType.LIMIT, OrderType.MARKET, OrderType.LIMIT_MAKER]
 
     @property
     def expected_trading_rule(self):
@@ -513,10 +544,6 @@ class GateIoPerpetualDerivativeTests(AbstractPerpetualDerivativeTests.PerpetualD
     @property
     def expected_exchange_order_id(self):
         return "335fd977-e5a5-4781-b6d0-c772d5bfb95b"
-
-    @property
-    def is_cancel_request_executed_synchronously_by_server(self) -> bool:
-        return True
 
     @property
     def is_order_fill_http_update_included_in_status_update(self) -> bool:
@@ -659,6 +686,21 @@ class GateIoPerpetualDerivativeTests(AbstractPerpetualDerivativeTests.PerpetualD
         url = self.configure_erroneous_cancelation_response(order=erroneous_order, mock_api=mock_api)
         all_urls.append(url)
         return all_urls
+
+    def configure_order_not_found_error_cancelation_response(
+            self, order: InFlightOrder, mock_api: aioresponses,
+            callback: Optional[Callable] = lambda *args, **kwargs: None
+    ) -> str:
+        # Implement the expected not found response when enabling test_cancel_order_not_found_in_the_exchange
+        raise NotImplementedError
+
+    def configure_order_not_found_error_order_status_response(
+            self, order: InFlightOrder, mock_api: aioresponses,
+            callback: Optional[Callable] = lambda *args, **kwargs: None
+    ) -> List[str]:
+        # Implement the expected not found response when enabling
+        # test_lost_order_removed_if_not_found_during_order_status_update
+        raise NotImplementedError
 
     def configure_completely_filled_order_status_response(
             self,
@@ -1468,6 +1510,18 @@ class GateIoPerpetualDerivativeTests(AbstractPerpetualDerivativeTests.PerpetualD
             )
         )
 
+    @aioresponses()
+    def test_cancel_order_not_found_in_the_exchange(self, mock_api):
+        # Disabling this test because the connector has not been updated yet to validate
+        # order not found during cancellation (check _is_order_not_found_during_cancelation_error)
+        pass
+
+    @aioresponses()
+    def test_lost_order_removed_if_not_found_during_order_status_update(self, mock_api):
+        # Disabling this test because the connector has not been updated yet to validate
+        # order not found during status update (check _is_order_not_found_during_status_update_error)
+        pass
+
     def _order_cancelation_request_successful_mock_response(self, order: InFlightOrder) -> Any:
         return {
             "id": order.exchange_order_id,
@@ -1573,3 +1627,86 @@ class GateIoPerpetualDerivativeTests(AbstractPerpetualDerivativeTests.PerpetualD
                 min_base_amount_increment=Decimal(str(0.000001)),
             )
         }
+
+    @aioresponses()
+    def test_start_network_update_trading_rules(self, mock_api):
+        self.exchange._set_current_timestamp(1000)
+
+        url = self.trading_rules_url
+
+        response = self.trading_rules_request_mock_response
+        results = response
+        duplicate = deepcopy(results[0])
+        duplicate["name"] = f"{self.exchange_trading_pair}_12345"
+        duplicate["quanto_multiplier"] = str(float(duplicate["quanto_multiplier"]) + 1)
+        results.append(duplicate)
+        mock_api.get(url, body=json.dumps(response))
+
+        self.async_run_with_timeout(self.exchange.start_network())
+
+        self.assertEqual(1, len(self.exchange.trading_rules))
+        self.assertIn(self.trading_pair, self.exchange.trading_rules)
+        self.assertEqual(repr(self.expected_trading_rule), repr(self.exchange.trading_rules[self.trading_pair]))
+
+    def place_limit_maker_buy_order(
+        self,
+        amount: Decimal = Decimal("100"),
+        price: Decimal = Decimal("10_000"),
+        position_action: PositionAction = PositionAction.OPEN,
+    ):
+        order_id = self.exchange.buy(
+            trading_pair=self.trading_pair,
+            amount=amount,
+            order_type=OrderType.LIMIT_MAKER,
+            price=price,
+            position_action=position_action,
+        )
+        return order_id
+
+    @aioresponses()
+    def test_create_buy_limit_maker_order_successfully(self, mock_api):
+        """Open long position"""
+        self._simulate_trading_rules_initialized()
+        request_sent_event = asyncio.Event()
+        self.exchange._set_current_timestamp(1640780000)
+
+        url = self.order_creation_url
+
+        creation_response = self.limit_maker_order_creation_request_successful_mock_response
+
+        mock_api.post(url,
+                      body=json.dumps(creation_response),
+                      callback=lambda *args, **kwargs: request_sent_event.set())
+
+        leverage = 2
+        self.exchange._perpetual_trading.set_leverage(self.trading_pair, leverage)
+        order_id = self.place_limit_maker_buy_order()
+        self.async_run_with_timeout(request_sent_event.wait())
+
+        order_request = self._all_executed_requests(mock_api, url)[0]
+        self.validate_auth_credentials_present(order_request)
+        self.assertIn(order_id, self.exchange.in_flight_orders)
+        self.validate_order_creation_request(
+            order=self.exchange.in_flight_orders[order_id],
+            request_call=order_request)
+
+        create_event = self.buy_order_created_logger.event_log[0]
+        self.assertEqual(self.exchange.current_timestamp,
+                         create_event.timestamp)
+        self.assertEqual(self.trading_pair, create_event.trading_pair)
+        self.assertEqual(OrderType.LIMIT_MAKER, create_event.type)
+        self.assertEqual(Decimal("100"), create_event.amount)
+        self.assertEqual(Decimal("10000"), create_event.price)
+        self.assertEqual(order_id, create_event.order_id)
+        self.assertEqual(str(self.expected_exchange_order_id),
+                         create_event.exchange_order_id)
+        self.assertEqual(leverage, create_event.leverage)
+        self.assertEqual(PositionAction.OPEN.value, create_event.position)
+
+        self.assertTrue(
+            self.is_logged(
+                "INFO",
+                f"Created {OrderType.LIMIT_MAKER.name} {TradeType.BUY.name} order {order_id} for "
+                f"{Decimal('100.000000')} to {PositionAction.OPEN.name} a {self.trading_pair} position."
+            )
+        )

@@ -12,7 +12,6 @@ from typing import Coroutine, List
 
 import path_util  # noqa: F401
 
-from bin.docker_connection import fork_and_start
 from bin.hummingbot import UIStartListener, detect_available_port
 from hummingbot import init_logging
 from hummingbot.client.config.config_crypt import BaseSecretsManager, ETHKeyFileSecretManger
@@ -30,7 +29,6 @@ from hummingbot.client.settings import STRATEGIES_CONF_DIR_PATH, AllConnectorSet
 from hummingbot.client.ui import login_prompt
 from hummingbot.client.ui.style import load_style
 from hummingbot.core.event.events import HummingbotUIEvent
-from hummingbot.core.gateway import start_existing_gateway_container
 from hummingbot.core.management.console import start_management_console
 from hummingbot.core.utils.async_utils import safe_gather
 
@@ -121,7 +119,7 @@ async def quick_start(args: argparse.Namespace, secrets_manager: BaseSecretsMana
     start_listener: UIStartListener = UIStartListener(hb, is_script=is_script, is_quickstart=True)
     hb.app.add_listener(HummingbotUIEvent.Start, start_listener)
 
-    tasks: List[Coroutine] = [hb.run(), start_existing_gateway_container(client_config_map)]
+    tasks: List[Coroutine] = [hb.run()]
     if client_config_map.debug_console:
         management_port: int = detect_available_port(8211)
         tasks.append(start_management_console(locals(), host="localhost", port=management_port))
@@ -150,8 +148,14 @@ def main():
     else:
         secrets_manager = secrets_manager_cls(args.config_password)
 
-    asyncio.get_event_loop().run_until_complete(quick_start(args, secrets_manager))
+    try:
+        ev_loop: asyncio.AbstractEventLoop = asyncio.get_event_loop()
+    except Exception:
+        ev_loop: asyncio.AbstractEventLoop = asyncio.new_event_loop()
+        asyncio.set_event_loop(ev_loop)
+
+    ev_loop.run_until_complete(quick_start(args, secrets_manager))
 
 
 if __name__ == "__main__":
-    fork_and_start(main)
+    main()
