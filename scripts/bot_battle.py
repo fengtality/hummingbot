@@ -12,9 +12,8 @@ from hummingbot.data_feed.candles_feed.candles_factory import CandlesFactory
 from hummingbot.strategy.script_strategy_base import ScriptStrategyBase
 
 
-class PMMhShiftedMidPriceDynamicSpread(ScriptStrategyBase):
+class BotBattleSep2023(ScriptStrategyBase):
     """
-    Design Template: https://hummingbot-foundation.notion.site/Simple-PMM-with-shifted-mid-price-and-dynamic-spreads-63cc765486dd42228d3da0b32537fc92
     Video: -
     Description:
     The bot will place two orders around the `reference_price` (mid price or last traded price +- %based on `RSI` value )
@@ -22,18 +21,23 @@ class PMMhShiftedMidPriceDynamicSpread(ScriptStrategyBase):
     based on `NATR`. Every `order_refresh_time` seconds, the bot will cancel and replace the orders.
     """
     # Define the variables that we are going to use for the spreads
-    # spread = (NATR * natr_scalar) / 2
+    # spread = [(NATR over candles_length) * natr_scalar] / 2
+    spread = 0
     natr_scalar = 5
-    spread = 1
+    candles_length = 8
 
-    # Define the price source and the multiplier that shifts the price
-    # price_multiplier = (RSI - 50) / 50 * spread_base
-    # reference_price = orig_price * (1 + price_multiplier)
+    # Define the price source, price the price
+    # price_multiplier = (RSI - 50) / 50 * spread
+    # reference_price = orig_price * (1 + price_multiplier) * (1 + inventory_multiplier)
     price_source = PriceType.BestBid
     orig_price = 1
     reference_price = 1
-    price_multiplier = 1
-    inventory_multipler = 1
+    price_multiplier = 0
+
+    # Inventory variables
+    target_ratio = 0.5
+    inventory_delta = 0
+    inventory_multiplier = 0
 
     # Trading conf
     order_refresh_time = 55
@@ -41,12 +45,6 @@ class PMMhShiftedMidPriceDynamicSpread(ScriptStrategyBase):
     trading_pair = "SEI-USDT"
     exchange = "binance"
     candle_exchange = "binance"
-    candles_length = 8
-
-    # Inventory variables
-    target_ratio = 0.5
-    inventory_delta = 0
-    inventory_multiplier = 0
 
     # Creating instance of the candles
     candles = CandlesFactory.get_candle(connector=candle_exchange,
@@ -108,7 +106,8 @@ class PMMhShiftedMidPriceDynamicSpread(ScriptStrategyBase):
         base_bal_in_quote = base_bal * self.orig_price
         quote_bal = self.connectors[self.exchange].get_balance("USDT")
         current_ratio = float(base_bal_in_quote / (base_bal_in_quote + quote_bal))
-        self.inventory_delta = (self.target_ratio - current_ratio) / self.target_ratio
+        delta = (self.target_ratio - current_ratio) / self.target_ratio
+        self.inventory_delta = max(-1, min(1, delta))
         self.inventory_multiplier = self.inventory_delta * self.spread
 
     def create_proposal(self) -> List[OrderCandidate]:
@@ -185,16 +184,19 @@ class PMMhShiftedMidPriceDynamicSpread(ScriptStrategyBase):
         inventory_price_shift = Decimal(self.inventory_multiplier) * Decimal(self.reference_price)
 
         lines.extend(["\n-----------------------------------------------------------------------------------------------------------\n"])
-        lines.extend(["", f"  Total Buy Orders: {self.total_buy_orders:.2f} | Total Sell Orders: {self.total_sell_orders:.2f}"])
-        lines.extend(["", f"  Total Buy Volume: {self.total_buy_volume:.2f} | Total Sell Volume: {self.total_sell_volume:.2f}"])
-        lines.extend(["\n-----------------------------------------------------------------------------------------------------------\n"])
-        lines.extend(["", f"  Spread bps: {self.spread * 10000:.1f} | Spread Price: {spread_price:.4f}"])
-        lines.extend(["", f"  Trending Price: {self.reference_price:.4f} | Trend Price Shift: {self.price_multiplier:.4f}"])
-        lines.extend(["", f"  Target Inventory Ratio: {self.target_ratio:.4f} | Inventory Delta: {self.inventory_delta:.4f}"])
-        lines.extend(["", f"  Orig Price: {self.orig_price:.4f} | Trend Shift: {trend_price_shift:.4f} | Inventory Shift: {inventory_price_shift:.4f} | Reference Price: {self.reference_price:.4f}"])
+        lines.extend(["  Spreads:\n"])
+        lines.extend(["", f"  Spread (bps): {self.spread * 10000:.1f} | Spread (price): {spread_price:.4f}"])
+        lines.extend(["", f"  Target Inventory Ratio: {self.target_ratio:.4f} | Inventory Delta: {self.inventory_delta:.4f} | Inventory Multiplier: {self.inventory_multiplier:.4f}"])
+        lines.extend(["", f"  Inventory Multiplier: {self.inventory_multiplier:.4f} | Inventory Shift: {inventory_price_shift:.4f}"])
+        lines.extend(["", f"  Price Multiplier: {self.price_multiplier:.4f} | Price Shift: {trend_price_shift:.4f}"])
+        lines.extend(["", f"  Orig Price: {self.orig_price:.4f} | Reference Price: {self.reference_price:.4f}"])
         lines.extend(["\n-----------------------------------------------------------------------------------------------------------\n"])
         candles_df = self.get_candles_with_features()
         lines.extend([f"Candles: {self.candles.name} | Interval: {self.candles.interval}"])
-        lines.extend(["    " + line for line in candles_df.tail(self.candles_length).to_string(index=False).split("\n")])
+        lines.extend(["    " + line for line in candles_df.tail().to_string(index=False).split("\n")])
+        lines.extend(["\n-----------------------------------------------------------------------------------------------------------\n"])
+        lines.extend(["  Trades:\n"])
+        lines.extend(["", f"  Total Buy Orders: {self.total_buy_orders:.2f} | Total Sell Orders: {self.total_sell_orders:.2f}"])
+        lines.extend(["", f"  Total Buy Volume: {self.total_buy_volume:.2f} | Total Sell Volume: {self.total_sell_volume:.2f}"])
         lines.extend(["\n-----------------------------------------------------------------------------------------------------------\n"])
         return "\n".join(lines)
