@@ -10,8 +10,8 @@ from hummingbot import data_path
 from hummingbot.connector.connector_base import ConnectorBase
 from hummingbot.core.data_type.common import OrderType, PositionAction, PositionMode, PositionSide, TradeType
 from hummingbot.data_feed.candles_feed.candles_base import CandlesBase
-from hummingbot.smart_components.position_executor.data_types import PositionConfig, TrailingStop
-from hummingbot.smart_components.position_executor.position_executor import PositionExecutor
+from hummingbot.smart_components.executors.position_executor.data_types import PositionConfig, TrailingStop
+from hummingbot.smart_components.executors.position_executor.position_executor import PositionExecutor
 from hummingbot.strategy.script_strategy_base import ScriptStrategyBase
 
 
@@ -31,7 +31,7 @@ class DirectionalStrategyBase(ScriptStrategyBase):
         take_profit (float): The take profit percentage.
         time_limit (int): The time limit for the position.
         open_order_type (OrderType): The order type for opening the position.
-        open_order_slippage_buffer (int): The slippage buffer for the opening order.
+        open_order_slippage_buffer (float): The slippage buffer for the opening order.
         take_profit_order_type (OrderType): The order type for the take profit order.
         stop_loss_order_type (OrderType): The order type for the stop loss order.
         time_limit_order_type (OrderType): The order type for the time limit order.
@@ -59,7 +59,7 @@ class DirectionalStrategyBase(ScriptStrategyBase):
     take_profit: float = 0.01
     time_limit: int = 120
     open_order_type = OrderType.MARKET
-    open_order_slippage_buffer: int = 0.001
+    open_order_slippage_buffer: float = 0.001
     take_profit_order_type: OrderType = OrderType.MARKET
     stop_loss_order_type: OrderType = OrderType.MARKET
     time_limit_order_type: OrderType = OrderType.MARKET
@@ -165,6 +165,13 @@ class DirectionalStrategyBase(ScriptStrategyBase):
             side = TradeType.BUY if signal == 1 else TradeType.SELL
             if self.open_order_type.is_limit_type():
                 price = price * (1 - signal * self.open_order_slippage_buffer)
+            if self.trailing_stop_activation_delta and self.trailing_stop_trailing_delta:
+                trailing_stop = TrailingStop(
+                    activation_price_delta=Decimal(self.trailing_stop_activation_delta),
+                    trailing_delta=Decimal(self.trailing_stop_trailing_delta),
+                )
+            else:
+                trailing_stop = None
             position_config = PositionConfig(
                 timestamp=self.current_timestamp,
                 trading_pair=self.trading_pair,
@@ -179,10 +186,7 @@ class DirectionalStrategyBase(ScriptStrategyBase):
                 take_profit_order_type=self.take_profit_order_type,
                 stop_loss_order_type=self.stop_loss_order_type,
                 time_limit_order_type=self.time_limit_order_type,
-                trailing_stop=TrailingStop(
-                    activation_price_delta=Decimal(self.trailing_stop_activation_delta),
-                    trailing_delta=Decimal(self.trailing_stop_trailing_delta)
-                ),
+                trailing_stop=trailing_stop,
                 leverage=self.leverage,
             )
             return position_config

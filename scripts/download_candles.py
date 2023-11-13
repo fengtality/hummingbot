@@ -4,7 +4,7 @@ from typing import Dict
 from hummingbot import data_path
 from hummingbot.client.hummingbot_application import HummingbotApplication
 from hummingbot.connector.connector_base import ConnectorBase
-from hummingbot.data_feed.candles_feed.candles_factory import CandlesFactory
+from hummingbot.data_feed.candles_feed.candles_factory import CandlesConfig, CandlesFactory
 from hummingbot.strategy.script_strategy_base import ScriptStrategyBase
 
 
@@ -25,7 +25,7 @@ class DownloadCandles(ScriptStrategyBase):
 
     @staticmethod
     def get_max_records(days_to_download: int, interval: str) -> int:
-        conversion = {"m": 1, "h": 60, "d": 1440}
+        conversion = {"s": 1 / 60, "m": 1, "h": 60, "d": 1440}
         unit = interval[-1]
         quantity = int(interval[:-1])
         return int(days_to_download * 24 * 60 / (quantity * conversion[unit]))
@@ -37,9 +37,8 @@ class DownloadCandles(ScriptStrategyBase):
         self.candles = {f"{combinations[0]}_{combinations[1]}": {} for combinations in combinations}
         # we need to initialize the candles for each trading pair
         for combination in combinations:
-            candle = CandlesFactory.get_candle(connector=self.exchange, trading_pair=combination[0],
-                                               interval=combination[1],
-                                               max_records=self.get_max_records(self.days_to_download, combination[1]))
+
+            candle = CandlesFactory.get_candle(CandlesConfig(connector=self.exchange, trading_pair=combination[0], interval=combination[1], max_records=self.get_max_records(self.days_to_download, combination[1])))
             candle.start()
             # we are storing the candles object and the csv path to save the candles
             self.candles[f"{combination[0]}_{combination[1]}"]["candles"] = candle
